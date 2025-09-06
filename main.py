@@ -8,12 +8,42 @@ from mediapipe.tasks.python import vision
 import time
 
 # ========================
+# Raspberry Pi GPIO (BCM)
+# ========================
+import RPi.GPIO as GPIO
+GPIO.setmode(GPIO.BCM)
+
+# Gesture -> GPIO mapping (BCM)
+LED_PINS = {
+    "thumbs up": 17,
+    "thumbs down": 27,
+    "left swipe": 22,     # "Left swing" synonym handled below
+    "right swipe": 23,    # "Right Swing" synonym handled below
+    "stop/resume": 24,    # "Stop Gesture" synonym handled below
+}
+
+# Prepare pins
+ALL_PINS = list(LED_PINS.values())
+for p in ALL_PINS:
+    GPIO.setup(p, GPIO.OUT, initial=GPIO.LOW)
+
+# Helper to turn only one LED on (others off)
+def set_exclusive_led(pin_on):
+    for p in ALL_PINS:
+        GPIO.output(p, GPIO.HIGH if p == pin_on else GPIO.LOW)
+
+# ========================
 # تنظیمات
 # ========================
 SEQUENCE_LENGTH = 30
 MODEL_PATH = "/home/amir/Downloads/LSTM_best_model2.tflite"
 HAND_MODEL_PATH = "/home/amir/Downloads/hand_landmarker.task"  # فایل .task
 class_names = ["Thumbs Up", "Left Swipe", "Right Swipe", "Stop Gesture", "Thumbs Down"]
+
+# Confidence threshold & debounce
+PRED_THRESHOLD = 0.70
+DEBOUNCE_SEC = 0.8     # avoid repeated triggers when same gesture is held
+TOGGLE_DEBOUNCE_SEC = 1.2  # slightly longer debounce for Stop/Resume toggle
 
 # ========================
 # لود مدل TFLite با LiteRT
@@ -70,74 +100,145 @@ def draw_hand(frame, landmarks):
         cv2.line(frame, (x1,y1), (x2,y2), (0,255,255), 2)
 
 # ========================
-# وبکم
+# Label normalization & synonyms
+# ========================
+def normalize_label(label: str) -> str:
+    """Map model labels/synonyms to our LED_PINS keys."""
+    l = label.strip().lower()
+    if l in ("thumbs up", "thumb up", "thumps up"):
+        return "thumbs up"
+    if l in ("thumbs down", "thumb down"):
+        return "thumbs down"
+    if l in ("left swipe", "left swing", "left"):
+        return "left swipe"
+    if l in ("right swipe", "right swing", "right"):
+        return "right swipe"
+    if l in ("stop gesture", "stop", "stop/resume", "resume"):
+        return "stop/resume"
+    return l
+
+# ========================
+# وبکم + Inference + GPIO control
 # ========================
 cap = cv2.VideoCapture(0)
 sequence = deque(maxlen=SEQUENCE_LENGTH)
 
 prev_time = time.time()
+last_trigger_time = 0.0
+last_label_key = None
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+# Track toggle state for Stop/Resume LED
+stop_led_state = False  # False=OFF, True=ON
 
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    landmarks, hand_landmarks = extract_landmarks(rgb_frame)
-    sequence.append(landmarks)
+try:
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    # رسم دست
-    if hand_landmarks:
-        draw_hand(frame, hand_landmarks)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        landmarks, hand_landmarks = extract_landmarks(rgb_frame)
+        sequence.append(landmarks)
 
-    pred_label, confidence, preds = None, None, None
+        # رسم دست
+        if hand_landmarks:
+            draw_hand(frame, hand_landmarks)
 
-    # پیش‌بینی
-    if len(sequence) == SEQUENCE_LENGTH:
-        input_data = np.expand_dims(sequence, axis=0).astype(np.float32)  # (1,30,63)
-        interpreter.set_tensor(input_details[0]['index'], input_data)
-        interpreter.invoke()
-        preds = interpreter.get_tensor(output_details[0]['index'])[0]
+        pred_label, confidence, preds = None, None, None
+        selected_pin = None
 
-        pred_class = np.argmax(preds)
-        pred_label = class_names[pred_class]
-        confidence = np.max(preds)
+        # پیش‌بینی
+        if len(sequence) == SEQUENCE_LENGTH:
+            input_data = np.expand_dims(sequence, axis=0).astype(np.float32)  # (1,30,63)
+            interpreter.set_tensor(input_details[0]['index'], input_data)
+            interpreter.invoke()
+            preds = interpreter.get_tensor(output_details[0]['index'])[0]
 
-        # رسم باکس متن
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (5, 5), (320, 120), (0,0,0), -1)
-        frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
+            pred_class = int(np.argmax(preds))
+            pred_label = class_names[pred_class]
+            confidence = float(np.max(preds))
 
-        cv2.putText(frame, f"{pred_label} ({confidence:.2f})",
-                    (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+            # Draw overlay
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (5, 5), (360, 140), (0,0,0), -1)
+            frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
 
-        # رسم نمودار میله‌ای
-        start_x, start_y = 15, 70
-        for i, cls in enumerate(class_names):
-            bar_length = int(preds[i] * 200)
-            cv2.rectangle(frame, (start_x, start_y + i*20),
-                                 (start_x + bar_length, start_y + i*20 + 15),
-                                 (255, 0, 0), -1)
-            cv2.putText(frame, f"{cls} {preds[i]:.2f}",
-                        (start_x + 210, start_y + i*20 + 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+            cv2.putText(frame, f"{pred_label} ({confidence:.2f})",
+                        (15, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
-    # FPS
-    curr_time = time.time()
-    fps = 1 / (curr_time - prev_time)
-    prev_time = curr_time
-    cv2.putText(frame, f"FPS: {fps:.1f}", (10, frame.shape[0]-10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+            # Bar chart
+            start_x, start_y = 15, 70
+            for i, cls in enumerate(class_names):
+                bar_length = int(preds[i] * 200)
+                cv2.rectangle(frame, (start_x, start_y + i*20),
+                                     (start_x + bar_length, start_y + i*20 + 15),
+                                     (255, 0, 0), -1)
+                cv2.putText(frame, f"{cls} {preds[i]:.2f}",
+                            (start_x + 210, start_y + i*20 + 12),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
 
-    cv2.imshow("Hand Gesture Recognition (LiteRT + Mediapipe)", frame)
+            # ========================
+            # GPIO control based on prediction
+            # ========================
+            now = time.time()
+            label_key = normalize_label(pred_label)
 
-    # --- فقط این بخش اضافه شده تا بستن با ضربدر درست عمل کند ---
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'):
-        break
-    if cv2.getWindowProperty("Hand Gesture Recognition (LiteRT + Mediapipe)", cv2.WND_PROP_VISIBLE) < 1:
-        break
-    # -----------------------------------------------------------
+            if confidence >= PRED_THRESHOLD and label_key in LED_PINS:
+                pin = LED_PINS[label_key]
+                selected_pin = pin  # for UI text
 
-cap.release()
-cv2.destroyAllWindows()
+                # Debounce timing
+                debounce = TOGGLE_DEBOUNCE_SEC if label_key == "stop/resume" else DEBOUNCE_SEC
+                should_trigger = (label_key != last_label_key) or ((now - last_trigger_time) >= debounce)
+
+                if should_trigger:
+                    if label_key == "stop/resume":
+                        # Toggle the stop/resume LED only; leave others as-is (off)
+                        stop_led_state = not stop_led_state
+                        GPIO.output(pin, GPIO.HIGH if stop_led_state else GPIO.LOW)
+                        # Optionally, also turn others off to make the state obvious:
+                        for p in ALL_PINS:
+                            if p != pin:
+                                GPIO.output(p, GPIO.LOW)
+                    else:
+                        # Turn on only the LED for this gesture; others off
+                        set_exclusive_led(pin)
+
+                    last_trigger_time = now
+                    last_label_key = label_key
+
+        # FPS
+        curr_time = time.time()
+        fps = 1 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 0.0
+        prev_time = curr_time
+
+        # UI footer
+        footer = f"FPS: {fps:.1f}"
+        if pred_label is not None:
+            footer += " | GPIO: "
+            lk = normalize_label(pred_label)
+            if lk in LED_PINS:
+                footer += f"{LED_PINS[lk]}"
+                if lk == "stop/resume":
+                    footer += f" (toggle {'ON' if stop_led_state else 'OFF'})"
+            else:
+                footer += "—"
+        cv2.putText(frame, footer, (10, frame.shape[0]-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        cv2.imshow("Hand Gesture Recognition (LiteRT + Mediapipe)", frame)
+
+        # --- graceful close ---
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        if cv2.getWindowProperty("Hand Gesture Recognition (LiteRT + Mediapipe)", cv2.WND_PROP_VISIBLE) < 1:
+            break
+
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
+    # Turn everything off and cleanup GPIO
+    for p in ALL_PINS:
+        GPIO.output(p, GPIO.LOW)
+    GPIO.cleanup()

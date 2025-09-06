@@ -22,10 +22,7 @@ Thumbs.db
 *.log
 
 # Model files
-*.h5
-*.pb
-*.tflite
-*.onnx
+
 
 # Dataset (to avoid pushing big files)
 dataset/
