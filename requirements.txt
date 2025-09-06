@@ -297,6 +297,7 @@ python-magic==0.4.27
 python-multipart==0.0.20
 python-oxmsg==0.0.2
 python-pptx==1.0.2
+python-vlc==3.0.21203
 python3-openid==3.2.0
 pytz==2025.2
 PyYAML==6.0.2
@@ -314,6 +315,7 @@ rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rich==14.0.0
 rpds-py==0.25.1
+RPi.GPIO==0.7.1
 rsa==4.9.1
 ruff==0.12.0
 safehttpx==0.1.6
