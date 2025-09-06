@@ -1,0 +1,41 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model files
+*.h5
+*.pb
+*.tflite
+*.onnx
+
+# Dataset (to avoid pushing big files)
+dataset/
+data/
+*.zip
+*.tar.gz
+
+# IDE configs
+.vscode/
+.idea/
+
+# Colab & Kaggle metadata
+*.json
