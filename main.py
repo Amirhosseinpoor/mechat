@@ -1,11 +1,22 @@
 import cv2
 import numpy as np
 from collections import deque
-from ai_edge_litert.interpreter import Interpreter
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import time
+
+# ========================
+# Use TensorFlow Lite Interpreter
+# ========================
+try:
+    # Preferred: TensorFlow installed (tf 2.x)
+    from tensorflow.lite import Interpreter
+    print("✅ Using TensorFlow Lite Interpreter (from tensorflow.lite)")
+except Exception:
+    # Fallback: lightweight tflite_runtime package
+    from tflite_runtime.interpreter import Interpreter
+    print("✅ Using TensorFlow Lite Interpreter (from tflite_runtime)")
 
 # ========================
 # Raspberry Pi GPIO (BCM)
@@ -46,7 +57,7 @@ DEBOUNCE_SEC = 0.8     # avoid repeated triggers when same gesture is held
 TOGGLE_DEBOUNCE_SEC = 1.2  # slightly longer debounce for Stop/Resume toggle
 
 # ========================
-# لود مدل TFLite با LiteRT
+# Load TFLite model (TensorFlow Lite)
 # ========================
 interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
@@ -196,7 +207,7 @@ try:
                         # Toggle the stop/resume LED only; leave others as-is (off)
                         stop_led_state = not stop_led_state
                         GPIO.output(pin, GPIO.HIGH if stop_led_state else GPIO.LOW)
-                        # Optionally, also turn others off to make the state obvious:
+                        # Also turn others off to make state obvious:
                         for p in ALL_PINS:
                             if p != pin:
                                 GPIO.output(p, GPIO.LOW)
@@ -226,13 +237,13 @@ try:
         cv2.putText(frame, footer, (10, frame.shape[0]-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        cv2.imshow("Hand Gesture Recognition (LiteRT + Mediapipe)", frame)
+        cv2.imshow("Hand Gesture Recognition (TensorFlow Lite + Mediapipe)", frame)
 
         # --- graceful close ---
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
-        if cv2.getWindowProperty("Hand Gesture Recognition (LiteRT + Mediapipe)", cv2.WND_PROP_VISIBLE) < 1:
+        if cv2.getWindowProperty("Hand Gesture Recognition (TensorFlow Lite + Mediapipe)", cv2.WND_PROP_VISIBLE) < 1:
             break
 
 finally:
