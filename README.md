@@ -192,7 +192,11 @@ python rpi_leds.py \
 > Requires a camera accessible via OpenCV. Script cleans up GPIO on exit.
 
 ---
-
+![Thumb Up](docs/assets/up.png)
+![Thumbs down](docs/assets/down.png)
+![Stop](docs/assets/stop.png)
+![Right](docs/assets/right.png)
+![Left](docs/assets/left.png)
 ## 📁 Assets you must provide
 
 * **`hand_landmarker.task`** (MediaPipe Hand Landmarker). Place it where your script expects:
